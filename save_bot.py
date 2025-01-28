@@ -22,7 +22,7 @@ logging.basicConfig(
 
 def sanitize_filename(filename):
     """Заменяем недопустимые символы на '-'."""
-    return re.sub(r'[<>:"/\\|?*]', '-', filename)
+    return re.sub(r'[<>:"/\\|?*\n]', '-', filename)
 
 
 @bot.message_handler(commands=['start'])
