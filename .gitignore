@@ -169,3 +169,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+bot_message/
+test_bot.py
+test_bot2.py
