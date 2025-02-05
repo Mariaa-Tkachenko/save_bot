@@ -19,7 +19,7 @@ logging.basicConfig(
 
 def sanitize_filename(filename: str) -> str:
     """Заменяем недопустимые символы на '-'."""
-    return re.sub(r'[<>:"/\\|?*]', '-', filename)
+    return re.sub(r'[<>:"/\\|?*\n]', '-', filename)
 
 
 def get_file_extension(file_path: str) -> str:
@@ -71,38 +71,80 @@ def handle_file_download(message, content_type: str) -> None:
     """Общая функция для скачивания и сохранения файлов (фото/видео)."""
     directory = create_directory()
     try:
-        file_info = bot.get_file(
-            (message.photo[-1].file_id) if (
-                content_type == 'photo'
-                ) else (message.video.file_id)
-        )
-
+        file_info = get_file_info(message, content_type)
         if not file_info.file_path:
-            logging.error("Не удалось получить путь к файлу.")
+            log_and_notify_error(
+                "Не удалось получить путь к файлу.", message.chat.id)
             return
 
         downloaded_file = bot.download_file(file_info.file_path)
-
-        extension = get_file_extension(file_info.file_path)
-        caption = message.caption if content_type == 'photo' else (
-            message.caption or (
-                f'{content_type}_{datetime.now().strftime("%d-%m-%Y %H-%M")}')
-        )
-
-        cleaned_caption = clean_caption(caption)
-        file_name = f"{sanitize_filename(cleaned_caption)}{extension}"
-        file_path = os.path.join(directory, file_name)
+        file_name, file_path = prepare_file_name_and_path(
+            file_info, message, directory, content_type)
 
         if save_file(file_path, downloaded_file):
             notify_user(message.chat.id, file_name)
         else:
-            remove_empty_directory(directory)
+            log_and_notify_error(
+                f"Ошибка при сохранении файла: {file_name}.", message.chat.id)
+            save_error_message(
+                directory, f"Ошибка при сохранении файла: {file_name}.")
     except Exception as e:
-        logging.error(f"Ошибка в процессе скачивания и сохранения файла: {e}")
-        bot.send_message(
-            chat_id=message.chat.id, text=f"Произошла ошибка: {e}"
-        )
+        handle_download_exception(e, message.chat.id, message, directory)
+
+
+def get_file_info(message, content_type: str):
+    """Получает информацию о файле в зависимости от типа контента."""
+    return bot.get_file(
+        (
+            message.photo[-1].file_id
+            ) if (content_type == 'photo') else (message.video.file_id)
+    )
+
+
+def prepare_file_name_and_path(
+        file_info, message, directory, content_type: str):
+    """Готовит имя файла и путь для сохранения."""
+    extension = get_file_extension(file_info.file_path)
+    caption = (
+        message.caption or (
+            f'{content_type}_{datetime.now().strftime("%d.%m.%Y %H:%M")}'))
+    cleaned_caption = clean_caption(caption)
+    file_name = f"{sanitize_filename(cleaned_caption)}{extension}"
+    file_path = os.path.join(directory, file_name)
+    return file_name, file_path
+
+
+def log_and_notify_error(error_message: str, chat_id: int) -> None:
+    """Логирует ошибку и отправляет уведомление пользователю."""
+    logging.error(error_message)
+    bot.send_message(chat_id=chat_id, text=error_message)
+
+
+def handle_download_exception(e, chat_id, message, directory, file_info=None, content_type='text') -> None:
+    """Обрабатывает исключения, возникающие при скачивании файла."""
+    if "400" in str(e):
+        caption = (
+            message.caption or (
+                f'{content_type}_{datetime.now().strftime("%d.%m.%Y %H:%M")}'))
+        cleaned_caption = clean_caption(caption)
+        file_name = f"{sanitize_filename(cleaned_caption)}.txt"
+        error_message = f"Файл большой для скачивания, сохранено сообщение: {file_name}"
+        log_and_notify_error(error_message, chat_id)
+        save_error_message(directory, file_name)
+    else:
+        log_and_notify_error(f"Ошибка в процессе скачивания и сохранения файла: {e}", chat_id)
         remove_empty_directory(directory)
+
+
+def save_error_message(directory: str, file_name) -> None:
+    """Сохраняет сообщение об ошибке в текстовый файл в указанной директории."""
+    error_file_path = os.path.join(directory, file_name)
+    try:
+        with open(error_file_path, 'w', encoding='utf-8') as error_file:
+            error_file.write(file_name)
+        logging.info(f"Сообщение об ошибке сохранено в: {error_file_path}")
+    except IOError as e:
+        logging.error(f"Ошибка при сохранении сообщения об ошибке: {e}")
 
 
 def remove_empty_directory(directory: str) -> None:
